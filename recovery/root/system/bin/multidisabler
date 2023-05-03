@@ -25,24 +25,33 @@ fsck() {
 }
 
 umount_vendor() {
-  echo " - Unmounting /vendor"
-  if mount | grep -q /vendor; then
-    umount /vendor &>/dev/null
-    if mount | grep -q /vendor; then
-      echo " -   Unmount failed. Aborting..."
+  echo " - Unmounting vendor..."
+  path=$1
+  if mount | grep -q ${path}; then
+    umount ${path} &>/dev/null
+    if mount | grep -q ${path}; then
+      echo " -   Unmount failed. Continue..."
       return 1
     fi
   fi
 }
 
 mount_vendor() {
-  echo " - Mounting /vendor"
-  if ! mount | grep -q /vendor; then
-    mount -o ro /vendor &>/dev/null
-    if ! mount | grep -q /vendor; then
+  echo " - Mounting vendor..."
+  block=$1
+  path=$2
+  if mount | grep -q ${path}; then
+    umount ${path} &>/dev/null
+  fi
+  if ! mount | grep -q ${path}; then
+    mount -o ro ${block} ${path} &>/dev/null
+    if ! mount | grep -q ${path}; then
       echo " -   Mount failed. Aborting..."
       return 1
     fi
+  else
+    echo " -   Device or resource busy..."
+    return 1
   fi
 }
 
@@ -87,23 +96,25 @@ echo " - Detected a SM-${device} device with a ${fw} (${bn}) bootloader."
 echo " - The environment appears to be Android ${major}"
 echo " "
 
-umount_vendor || exit 1
+mkdir -p /tmp/vendor
+dm_block=/dev/block/mapper/vendor
+
+umount_vendor "/vendor"
 lptools unmap vendor
 lptools map vendor
-mount_vendor || exit 1
+mount_vendor "${dm_block}" "/tmp/vendor" || exit 1
 
-dm_block=$(df -t f2fs | grep "/vendor" | cut -DF1)
-if [ "$dm_block" == "" ]; then
+if [ ! -e "${dm_block}" ]; then
   echo " - Error: Could not determine vendor block..."
   exit 1
 fi
 echo " - Detected vendor at ${dm_block}"
 
-if grep -qs "/vendor/recovery-from-boot.p" /vendor/bin/install-recovery.sh || grep -qs "fileencryption=" /vendor/etc/fstab.*; then
+if grep -qs "/vendor/recovery-from-boot.p" /tmp/vendor/bin/install-recovery.sh || grep -qs "fileencryption=" /tmp/vendor/etc/fstab.*; then
   run=true
 fi
 
-umount_vendor || exit 1
+umount_vendor "/tmp/vendor" || exit 1
 
 if [ "$run" == "true" ]; then
   patch_block $dm_block
@@ -111,6 +122,9 @@ if [ "$run" == "true" ]; then
 else
   echo " - Nothing to do!"
 fi
+
+sync
+rm -rf /tmp/vendor
 
 echo " "
 echo " - Finished."
