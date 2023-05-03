@@ -24,6 +24,28 @@ fsck() {
     fi
 }
 
+umount_vendor() {
+  echo " - Unmounting /vendor"
+  if mount | grep -q /vendor; then
+    umount /vendor &>/dev/null
+    if mount | grep -q /vendor; then
+      echo " -   Unmount failed. Aborting..."
+      return 1
+    fi
+  fi
+}
+
+mount_vendor() {
+  echo " - Mounting /vendor"
+  if ! mount | grep -q /vendor; then
+    mount -o ro /vendor &>/dev/null
+    if ! mount | grep -q /vendor; then
+      echo " -   Mount failed. Aborting..."
+      return 1
+    fi
+  fi
+}
+
 echo " "
 echo "Multi-disabler for Samsung devices"
 echo "running ReadOnly F2FS Vendor Images."
@@ -38,6 +60,7 @@ dp=$(getprop ro.boot.dynamic_partitions)
 # of bootloader string (12 or 13).
 #
 fw=${bl:$((${#bl} - 4)):4}
+bn=${bl:$((${#bl} - 6)):2}
 
 # Device is first 5 characters of bootloader string.
 #
@@ -60,32 +83,34 @@ if [ -n "$fatal" ]; then
   exit 1
 fi
 
-echo " - Detected a $device device with a $fw bootloader."
-echo " - The environment appears to be Android $major."
+echo " - Detected a SM-${device} device with a ${fw} (${bn}) bootloader."
+echo " - The environment appears to be Android ${major}"
 echo " "
 
-echo " - Mounting /vendor..."
-mount -o ro /vendor &>/dev/null
-if ! mount | grep -q /vendor; then
-  echo " -   Mount failed. Aborting..."
-  exit 1
-fi
+umount_vendor || exit 1
+lptools unmap vendor
+lptools map vendor
+mount_vendor || exit 1
 
 dm_block=$(df -t f2fs | grep "/vendor" | cut -DF1)
 if [ "$dm_block" == "" ]; then
-    echo " - Error: Could not determine vendor block..."
-    exit 1
+  echo " - Error: Could not determine vendor block..."
+  exit 1
 fi
 echo " - Detected vendor at ${dm_block}"
 
-umount /vendor &>/dev/null
-if mount | grep -q /vendor; then
-  echo " -   Unmount failed. Aborting..."
-  exit 1
+if grep -qs "/vendor/recovery-from-boot.p" /vendor/bin/install-recovery.sh || grep -qs "fileencryption=" /vendor/etc/fstab.*; then
+  run=true
 fi
 
-patch_block $dm_block
-fsck $dm_block
+umount_vendor || exit 1
+
+if [ "$run" == "true" ]; then
+  patch_block $dm_block
+  fsck $dm_block
+else
+  echo " - Nothing to do!"
+fi
 
 echo " "
 echo " - Finished."

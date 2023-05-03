@@ -3,6 +3,7 @@
 #include <cstring>
 #include <fcntl.h>
 #include <iostream>
+#include <limits.h>
 #include <linux/fs.h>
 #include <string>
 #include <sys/ioctl.h>
@@ -34,21 +35,33 @@ std::vector<uint8_t> str2hex(const std::string &text) {
   return hexVec;
 }
 
-int replacebinary(const char *filename, std::vector<std::string> replacements,
+std::string realPath(std::string filePath, bool beQuiet) {
+  char resolvedPath[PATH_MAX];
+  if (realpath(filePath.data(), resolvedPath) == nullptr) {
+    if (!beQuiet) {
+      std::cerr << "Failed to resolve realpath for " << filePath << std::endl;
+    }
+    exit(CODE_FAILURE);
+  }
+  return resolvedPath;
+}
+
+int replacebinary(std::string filePath, std::vector<std::string> replacements,
                   bool beQuiet) {
   ssize_t replacedCount = 0;
-  int fd = open(filename, O_RDWR);
+  filePath = realPath(filePath, beQuiet);
+
+  struct stat sb;
+  int fd = open(filePath.data(), O_RDWR);
   if (fd == -1) {
     if (!beQuiet) {
-      std::cerr << "Failed to open " << filename << std::endl;
+      std::cerr << "Failed to open " << filePath << std::endl;
     }
     return CODE_FAILURE;
   }
-
-  struct stat sb;
-  if (fstat(fd, &sb) == -1) {
+  if (lstat(filePath.data(), &sb) == -1) {
     if (!beQuiet) {
-      std::cerr << "Failed to fstat " << filename << std::endl;
+      std::cerr << "Failed to lstat " << filePath << std::endl;
     }
     close(fd);
     return CODE_FAILURE;
@@ -58,7 +71,7 @@ int replacebinary(const char *filename, std::vector<std::string> replacements,
   bool isRegular = S_ISREG(sb.st_mode);
   if (!isBlock && !isRegular) {
     if (!beQuiet) {
-      std::cerr << "Error: '" << filename
+      std::cerr << "Error: '" << filePath
                 << "' is neither a regular file nor a block device."
                 << std::endl;
     }
@@ -68,7 +81,7 @@ int replacebinary(const char *filename, std::vector<std::string> replacements,
   if (isBlock) {
     if (ioctl(fd, BLKGETSIZE64, &fdSize) < 0) {
       if (!beQuiet) {
-        std::cerr << "Failed to get size of " << filename << std::endl;
+        std::cerr << "Failed to get size of " << filePath << std::endl;
       }
       close(fd);
       return CODE_FAILURE;
@@ -78,16 +91,16 @@ int replacebinary(const char *filename, std::vector<std::string> replacements,
   }
 
   auto it = std::max_element(replacements.begin(), replacements.end(),
-        [](const std::string& a, const std::string& b) {
-            return a.length() < b.length();
-        });
+                             [](const std::string &a, const std::string &b) {
+                               return a.length() < b.length();
+                             });
 
   if (fdSize < it->length()) {
-      if (!beQuiet) {
-        std::cerr << "Invalid file size: " << std::to_string(fdSize) << std::endl;
-      }
-      close(fd);
-      return CODE_FAILURE;
+    if (!beQuiet) {
+      std::cerr << "Invalid file size: " << std::to_string(fdSize) << std::endl;
+    }
+    close(fd);
+    return CODE_FAILURE;
   }
 
   if (fdSize > getTotalSystemMemory() / 100 * MAX_MEMORY_PERCENT) {
@@ -116,7 +129,7 @@ int replacebinary(const char *filename, std::vector<std::string> replacements,
   }
   if (bytesRead == -1) {
     if (!beQuiet) {
-      std::cerr << "Failed to read " << filename << std::endl;
+      std::cerr << "Failed to read " << filePath << std::endl;
     }
     replacedCount = CODE_FAILURE;
     goto done;
@@ -166,7 +179,7 @@ done:
 
 void usage(char *executable) {
   std::cout << "    Usage: " << executable
-            << " [--quiet|-q] <filename> <from|to> [from|to] ..." << std::endl;
+            << " [--quiet|-q] <filePath> <from|to> [from|to] ..." << std::endl;
   std::cout << "    'from' and 'to' should have same the length in order to be "
                "replaced."
             << std::endl
