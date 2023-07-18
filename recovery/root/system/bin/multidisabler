@@ -104,6 +104,13 @@ lptools unmap vendor
 lptools map vendor
 mount_vendor "${dm_block}" "/tmp/vendor" || exit 1
 
+if ! mount | grep "/tmp/vendor" | grep -qs "f2fs"; then
+  echo " - Vendor isn't f2fs, abort..."
+  umount_vendor "/tmp/vendor" || exit 0
+  rm -rf "/tmp/vendor"
+  exit 0
+fi
+
 if [ ! -e "${dm_block}" ]; then
   echo " - Error: Could not determine vendor block..."
   exit 1
