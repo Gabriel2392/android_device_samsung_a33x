@@ -81,6 +81,8 @@ umount_vendor "/tmp/vendor" || exit 1
 if [ "$run" == "true" ]; then
   patch_block $dm_block
   fsck $dm_block
+  twrp format data
+  mke2fs -F /dev/block/by-name/metadata
 else
   echo " - Encryption is already disabled!"
 fi
