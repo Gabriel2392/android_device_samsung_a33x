@@ -1,12 +1,8 @@
 #!/system/bin/sh
-#
-# A simple Samsung services disabler by Ian Macdonald.
-#
-# Use this to prime your device after installing TWRP.
 
 patch_block() {
-    echo " - Disabling recovery restoration..."
-    bxhsed --quiet $1 '/vendor/recovery-from-boot.p|/vendor/recovery-from-bsod.p'
+    echo " - Disabling encryption..."
+    bxhsed --quiet $1 'fileencryption=|notencryptable='
     ret=$?
     if [ "$ret" -gt "0" ]; then
         echo " -    Success... (${ret})"
@@ -55,47 +51,6 @@ mount_vendor() {
   fi
 }
 
-echo " "
-echo "Multi-disabler for Samsung devices"
-echo "running ReadOnly F2FS Vendor Images."
-echo " "
-
-os=$(getprop ro.build.version.release)
-major=${os%%.*}
-bl=$(getprop ro.boot.bootloader)
-dp=$(getprop ro.boot.dynamic_partitions)
-
-# Firmware version starts at either 8th or 9th character, depending on length
-# of bootloader string (12 or 13).
-#
-fw=${bl:$((${#bl} - 4)):4}
-bn=${bl:$((${#bl} - 6)):2}
-
-# Device is first 5 characters of bootloader string.
-#
-device=${bl:0:$((${#bl} - 8))}
-mft=$(getprop ro.product.manufacturer | tr '[A-Z]' '[a-z]')
-
-if [ "$mft" != samsung ]; then
-  echo " - Device appears not to be made by Samsung."
-  fatal=true
-elif [ -z "$device" ]; then
-  echo " - Could not determine device model."
-  fatal=true
-elif [ $major -lt 9 ]; then
-  echo " - This software is incompatible with Android $major."
-  fatal=true
-fi
-if [ -n "$fatal" ]; then
-  echo " - Installation aborted."
-  echo " "
-  exit 1
-fi
-
-echo " - Detected a SM-${device} device with a ${fw} (${bn}) bootloader."
-echo " - The environment appears to be Android ${major}"
-echo " "
-
 mkdir -p /tmp/vendor
 dm_block=/dev/block/mapper/vendor
 
@@ -105,7 +60,7 @@ lptools map vendor
 mount_vendor "${dm_block}" "/tmp/vendor" || exit 1
 
 if ! mount | grep "/tmp/vendor" | grep -qs "f2fs"; then
-  echo " - Vendor isn't f2fs, skip patch..."
+  echo " - Vendor isn't f2fs, skip..."
   umount_vendor "/tmp/vendor" || exit 0
   rmdir "/tmp/vendor"
   exit 0
@@ -117,7 +72,7 @@ if [ ! -e "${dm_block}" ]; then
 fi
 echo " - Detected vendor at ${dm_block}"
 
-if grep -qs "/vendor/recovery-from-boot.p" /tmp/vendor/bin/install-recovery.sh; then
+if grep -qs "fileencryption=" /tmp/vendor/etc/fstab.*; then
   run=true
 fi
 
@@ -126,8 +81,10 @@ umount_vendor "/tmp/vendor" || exit 1
 if [ "$run" == "true" ]; then
   patch_block $dm_block
   fsck $dm_block
+  twrp format data
+  mke2fs -F /dev/block/by-name/metadata
 else
-  echo " - Nothing to do!"
+  echo " - Encryption is already disabled!"
 fi
 
 sync
